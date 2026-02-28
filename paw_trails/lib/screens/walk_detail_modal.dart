@@ -163,8 +163,12 @@ class WalkDetailModal extends StatelessWidget {
                   ...walk.dogIds.map((dogId) {
                     final dog = appState.dogs.firstWhere(
                       (d) => d.id == dogId,
-                      orElse: () =>
-                          Dog(name: 'Unknown', breed: '', age: 0, weight: 0),
+                      orElse: () => Dog(
+                        name: 'Unknown',
+                        breed: '',
+                        birthday: DateTime.now(),
+                        weight: 0,
+                      ),
                     );
                     return ListTile(
                       contentPadding: EdgeInsets.zero,

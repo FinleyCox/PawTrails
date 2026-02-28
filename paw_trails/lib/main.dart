@@ -472,6 +472,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     'Pavement: ${(_convertTemp(weather.floorTemperature, appState.isMetric)).toStringAsFixed(1)}°${appState.isMetric ? 'C' : 'F'} / Air: ${(_convertTemp(weather.temperature, appState.isMetric)).toStringAsFixed(1)}°${appState.isMetric ? 'C' : 'F'}',
                     style: TextStyle(
                       color: isHot ? Colors.red[700] : Colors.green[700],
+                      fontSize: 13,
                     ),
                   ),
                 ],
@@ -601,7 +602,7 @@ class DogsScreen extends StatelessWidget {
                                   ),
                                 ),
                                 Text(
-                                  '${dog.breed} • ${dog.age} years old',
+                                  '${dog.breed} • ${dog.ageString}',
                                   style: TextStyle(color: Colors.grey[600]),
                                 ),
                                 const SizedBox(height: 8),
@@ -628,14 +629,52 @@ class DogsScreen extends StatelessWidget {
                               ],
                             ),
                           ),
-                          IconButton(
+                          PopupMenuButton<String>(
                             icon: const Icon(
-                              Icons.delete_outline,
+                              Icons.more_vert,
                               color: Colors.grey,
                             ),
-                            onPressed: () {
-                              _showDeleteConfirmation(context, appState, dog);
+                            onSelected: (value) {
+                              if (value == 'edit') {
+                                showModalBottomSheet(
+                                  context: context,
+                                  isScrollControlled: true,
+                                  backgroundColor: Colors.transparent,
+                                  builder: (context) => DogFormModal(dog: dog),
+                                );
+                              } else if (value == 'delete') {
+                                _showDeleteConfirmation(context, appState, dog);
+                              }
                             },
+                            itemBuilder: (context) => [
+                              const PopupMenuItem(
+                                value: 'edit',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.edit, size: 20),
+                                    SizedBox(width: 8),
+                                    Text('Edit profile'),
+                                  ],
+                                ),
+                              ),
+                              const PopupMenuItem(
+                                value: 'delete',
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.delete_outline,
+                                      size: 20,
+                                      color: Colors.red,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Delete dog',
+                                      style: TextStyle(color: Colors.red),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -686,25 +725,38 @@ class DogsScreen extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => const AddDogModal(),
+      builder: (context) => const DogFormModal(),
     );
   }
 }
 
-class AddDogModal extends StatefulWidget {
-  const AddDogModal({super.key});
+class DogFormModal extends StatefulWidget {
+  final Dog? dog;
+  const DogFormModal({super.key, this.dog});
 
   @override
-  State<AddDogModal> createState() => _AddDogModalState();
+  State<DogFormModal> createState() => _DogFormModalState();
 }
 
-class _AddDogModalState extends State<AddDogModal> {
+class _DogFormModalState extends State<DogFormModal> {
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _breedController = TextEditingController();
-  final _ageController = TextEditingController();
-  final _weightController = TextEditingController();
+  late TextEditingController _nameController;
+  late TextEditingController _breedController;
+  late TextEditingController _weightController;
+  DateTime? _selectedBirthday;
   String? _photoPath;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.dog?.name ?? '');
+    _breedController = TextEditingController(text: widget.dog?.breed ?? '');
+    _weightController = TextEditingController(
+      text: widget.dog?.weight.toString() ?? '',
+    );
+    _selectedBirthday = widget.dog?.birthday;
+    _photoPath = widget.dog?.photoPath;
+  }
 
   Future<void> _pickImage() async {
     final picker = ImagePicker();
@@ -712,6 +764,20 @@ class _AddDogModalState extends State<AddDogModal> {
     if (image != null) {
       setState(() {
         _photoPath = image.path;
+      });
+    }
+  }
+
+  Future<void> _selectBirthday() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedBirthday ?? DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null) {
+      setState(() {
+        _selectedBirthday = picked;
       });
     }
   }
@@ -737,7 +803,7 @@ class _AddDogModalState extends State<AddDogModal> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Add New Dog',
+                widget.dog == null ? 'Add New Dog' : 'Edit Dog Profile',
                 style: Theme.of(context).textTheme.displayLarge,
               ),
               const SizedBox(height: 24),
@@ -782,11 +848,22 @@ class _AddDogModalState extends State<AddDogModal> {
               Row(
                 children: [
                   Expanded(
-                    child: TextFormField(
-                      controller: _ageController,
-                      keyboardType: TextInputType.number,
-                      decoration: _inputDecoration('Age', Icons.cake),
-                      validator: (v) => v?.isEmpty ?? true ? 'Required' : null,
+                    child: InkWell(
+                      onTap: _selectBirthday,
+                      child: IgnorePointer(
+                        child: TextFormField(
+                          controller: TextEditingController(
+                            text: _selectedBirthday == null
+                                ? ''
+                                : DateFormat(
+                                    'yyyy/MM/dd',
+                                  ).format(_selectedBirthday!),
+                          ),
+                          decoration: _inputDecoration('Birthday', Icons.cake),
+                          validator: (v) =>
+                              _selectedBirthday == null ? 'Required' : null,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -810,13 +887,24 @@ class _AddDogModalState extends State<AddDogModal> {
                   onPressed: () {
                     if (_formKey.currentState?.validate() ?? false) {
                       final dog = Dog(
+                        id: widget.dog?.id,
                         name: _nameController.text,
                         breed: _breedController.text,
-                        age: double.tryParse(_ageController.text) ?? 0,
+                        birthday: _selectedBirthday!,
                         weight: double.tryParse(_weightController.text) ?? 0,
                         photoPath: _photoPath,
                       );
-                      Provider.of<AppState>(context, listen: false).addDog(dog);
+                      if (widget.dog == null) {
+                        Provider.of<AppState>(
+                          context,
+                          listen: false,
+                        ).addDog(dog);
+                      } else {
+                        Provider.of<AppState>(
+                          context,
+                          listen: false,
+                        ).updateDog(dog);
+                      }
                       Navigator.pop(context);
                     }
                   },
@@ -829,9 +917,12 @@ class _AddDogModalState extends State<AddDogModal> {
                     ),
                     elevation: 0,
                   ),
-                  child: const Text(
-                    'Save Dog',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  child: Text(
+                    widget.dog == null ? 'Save Dog' : 'Update Profile',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
@@ -1020,7 +1111,7 @@ class WalksScreen extends StatelessWidget {
                                 orElse: () => Dog(
                                   name: 'Unknown',
                                   breed: '',
-                                  age: 0,
+                                  birthday: DateTime.now(),
                                   weight: 0,
                                 ),
                               );

@@ -47,18 +47,6 @@ class SettingsScreen extends StatelessWidget {
             },
           ),
           const SizedBox(height: 24),
-          _buildSectionHeader(context, 'Account & Data'),
-          _buildSettingTile(
-            context,
-            icon: Icons.cloud_upload_outlined,
-            title: 'Backup & Sync',
-            subtitle: 'Last synced: Never',
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Cloud sync coming soon!')),
-              );
-            },
-          ),
           _buildSettingTile(
             context,
             icon: Icons.delete_outline,
@@ -81,7 +69,23 @@ class SettingsScreen extends StatelessWidget {
             context,
             icon: Icons.favorite_border,
             title: 'Rate PawTrails',
-            onTap: () {},
+            onTap: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Rate PawTrails'),
+                  content: const Text(
+                    'Thank you for using PawTrails! Rating functionality will be available once we are on the App Store.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('OK'),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
         ],
       ),
