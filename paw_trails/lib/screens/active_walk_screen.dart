@@ -130,7 +130,7 @@ class _ActiveWalkScreenState extends State<ActiveWalkScreen> {
             children: [
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.paw_trails',
+                userAgentPackageName: 'com.ain.paw_trails',
               ),
               PolylineLayer(
                 polylines: [

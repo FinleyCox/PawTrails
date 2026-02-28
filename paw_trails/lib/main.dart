@@ -146,21 +146,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadWeather() async {
     setState(() => _isFetchingWeather = true);
-    final loc = await _locationService.getCurrentLocation();
-    if (loc != null) {
-      final weather = await _weatherService.fetchWeather(
-        loc.latitude,
-        loc.longitude,
-      );
-      if (mounted) {
-        setState(() {
-          _weather = weather;
-          _isFetchingWeather = false;
-        });
+    final hasPermission = await _locationService.requestPermission();
+    if (hasPermission) {
+      final loc = await _locationService.getCurrentLocation();
+      if (loc != null) {
+        final weather = await _weatherService.fetchWeather(
+          loc.latitude,
+          loc.longitude,
+        );
+        if (mounted) {
+          setState(() {
+            _weather = weather;
+            _isFetchingWeather = false;
+          });
+        }
+        return;
       }
-    } else {
-      if (mounted) setState(() => _isFetchingWeather = false);
     }
+    if (mounted) setState(() => _isFetchingWeather = false);
   }
 
   @override

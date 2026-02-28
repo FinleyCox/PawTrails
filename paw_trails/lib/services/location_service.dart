@@ -26,11 +26,17 @@ class LocationService {
   }
 
   Future<LatLng?> getCurrentLocation() async {
-    try {
-      final loc = await _location.getLocation();
-      return LatLng(loc.latitude!, loc.longitude!);
-    } catch (e) {
-      return null;
+    for (int i = 0; i < 3; i++) {
+      try {
+        final loc = await _location.getLocation();
+        if (loc.latitude != null && loc.longitude != null) {
+          return LatLng(loc.latitude!, loc.longitude!);
+        }
+      } catch (e) {
+        if (i == 2) return null;
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
     }
+    return null;
   }
 }
