@@ -100,6 +100,8 @@ class WalkDetailModal extends StatelessWidget {
                               TileLayer(
                                 urlTemplate:
                                     'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                userAgentPackageName:
+                                    'com.example.paws_and_paths',
                               ),
                               PolylineLayer(
                                 polylines: [
