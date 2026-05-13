@@ -13,7 +13,6 @@ export interface WalkEvent {
 export interface WeatherSnapshot {
   temp: number;
   condition: string;
-  estimatedGroundTemp: number;
 }
 
 export interface Walk {
@@ -27,4 +26,6 @@ export interface Walk {
   weather?: WeatherSnapshot;
   events: WalkEvent[];
   distanceMeters: number;
+  steps?: number;
+  photoUrl?: string;
 }

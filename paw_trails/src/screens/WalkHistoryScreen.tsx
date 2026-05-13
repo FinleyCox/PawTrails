@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, FlatList, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, FlatList, TouchableOpacity, Image, StyleSheet } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { useWalkStore } from "../stores/walkStore";
 import { useDogStore } from "../stores/dogStore";
@@ -36,15 +36,25 @@ export default function WalkHistoryScreen() {
             const dogNames = walkDogs.map((d) => d.name).join(", ");
             return (
               <TouchableOpacity style={styles.card} onPress={() => navigation.navigate("WalkDetail", { walk: item })}>
-                <View style={styles.cardHeader}>
-                  <Text style={styles.cardDate}>{dateStr} {timeStr}</Text>
-                  {!!dogNames && <Text style={styles.dogNames}>🐾 {dogNames}</Text>}
-                </View>
-                <View style={styles.statsRow}>
-                  <Text style={styles.stat}>📍 {distKm} km</Text>
-                  <Text style={styles.stat}>⏱ {mins} {i18n.t("min")}</Text>
-                  {pooCount > 0 && <Text style={styles.stat}>💩 ×{pooCount}</Text>}
-                  {peeCount > 0 && <Text style={styles.stat}>💧 ×{peeCount}</Text>}
+                {item.photoUrl ? (
+                  <Image source={{ uri: item.photoUrl }} style={styles.photo} />
+                ) : (
+                  <View style={styles.photoPlaceholder}>
+                    <Text style={styles.photoPlaceholderText}>🐾</Text>
+                  </View>
+                )}
+                <View style={styles.cardBody}>
+                  <View style={styles.cardHeader}>
+                    <Text style={styles.cardDate}>{dateStr} {timeStr}</Text>
+                    {!!dogNames && <Text style={styles.dogNames}>🐾 {dogNames}</Text>}
+                  </View>
+                  <View style={styles.statsRow}>
+                    <Text style={styles.stat}>📍 {distKm} km</Text>
+                    <Text style={styles.stat}>⏱ {mins} {i18n.t("min")}</Text>
+                    {(item.steps ?? 0) > 0 && <Text style={styles.stat}>👟 {item.steps?.toLocaleString()}</Text>}
+                    {pooCount > 0 && <Text style={styles.stat}>💩 ×{pooCount}</Text>}
+                    {peeCount > 0 && <Text style={styles.stat}>💧 ×{peeCount}</Text>}
+                  </View>
                 </View>
               </TouchableOpacity>
             );
@@ -61,17 +71,27 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: COLORS.surface,
     borderRadius: 14,
-    padding: 16,
     marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    overflow: "hidden",
   },
+  photo: { width: 72, height: 72 },
+  photoPlaceholder: {
+    width: 72, height: 72,
+    backgroundColor: "#F0F0F0",
+    alignItems: "center", justifyContent: "center",
+  },
+  photoPlaceholderText: { fontSize: 28 },
+  cardBody: { flex: 1, padding: 12 },
   cardHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 10,
+    marginBottom: 6,
   },
-  cardDate: { fontSize: 14, fontWeight: "700", color: COLORS.text },
-  dogNames: { fontSize: 13, color: COLORS.textMuted },
-  statsRow: { flexDirection: "row", gap: 12, flexWrap: "wrap" },
-  stat: { fontSize: 14, color: COLORS.text, fontWeight: "500" },
+  cardDate: { fontSize: 13, fontWeight: "700", color: COLORS.text },
+  dogNames: { fontSize: 12, color: COLORS.textMuted },
+  statsRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  stat: { fontSize: 13, color: COLORS.text, fontWeight: "500" },
 });

@@ -9,6 +9,8 @@ interface WalkState {
   addEvent: (event: WalkEvent) => void;
   setWeather: (weather: WeatherSnapshot) => void;
   updateDistance: (meters: number) => void;
+  updateSteps: (steps: number) => void;
+  setWalkPhoto: (photoUrl: string) => void;
   endWalk: () => Walk | null;
   setWalks: (walks: Walk[]) => void;
 }
@@ -20,22 +22,12 @@ export const useWalkStore = create<WalkState>((set, get) => ({
   appendRoutePoint: (point) =>
     set((s) => {
       if (!s.activeWalk) return s;
-      return {
-        activeWalk: {
-          ...s.activeWalk,
-          route: [...s.activeWalk.route, point],
-        },
-      };
+      return { activeWalk: { ...s.activeWalk, route: [...s.activeWalk.route, point] } };
     }),
   addEvent: (event) =>
     set((s) => {
       if (!s.activeWalk) return s;
-      return {
-        activeWalk: {
-          ...s.activeWalk,
-          events: [...s.activeWalk.events, event],
-        },
-      };
+      return { activeWalk: { ...s.activeWalk, events: [...s.activeWalk.events, event] } };
     }),
   setWeather: (weather) =>
     set((s) => {
@@ -46,6 +38,16 @@ export const useWalkStore = create<WalkState>((set, get) => ({
     set((s) => {
       if (!s.activeWalk) return s;
       return { activeWalk: { ...s.activeWalk, distanceMeters: meters } };
+    }),
+  updateSteps: (steps) =>
+    set((s) => {
+      if (!s.activeWalk) return s;
+      return { activeWalk: { ...s.activeWalk, steps } };
+    }),
+  setWalkPhoto: (photoUrl) =>
+    set((s) => {
+      if (!s.activeWalk) return s;
+      return { activeWalk: { ...s.activeWalk, photoUrl } };
     }),
   endWalk: () => {
     const walk = get().activeWalk;

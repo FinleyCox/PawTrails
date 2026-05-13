@@ -1,13 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Alert, Image } from "react-native";
 import MapView, { Polyline, Marker } from "react-native-maps";
 import { useNavigation } from "@react-navigation/native";
 import { useWalkStore } from "../stores/walkStore";
 import { useUserStore } from "../stores/userStore";
 import { watchPosition, calcDistanceMeters } from "../services/locationService";
 import { saveWalk } from "../services/firestoreService";
+import { uploadWalkPhoto } from "../services/storageService";
+import * as ImagePicker from "expo-image-picker";
+import { Pedometer } from "expo-sensors";
 import i18n from "../i18n";
-import { COLORS, GROUND_TEMP_DANGER } from "../constants/theme";
+import { COLORS } from "../constants/theme";
 import type * as Location from "expo-location";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../App";
@@ -16,11 +19,13 @@ type Nav = NativeStackNavigationProp<RootStackParamList, "ActiveWalk">;
 
 export default function ActiveWalkScreen() {
   const navigation = useNavigation<Nav>();
-  const { activeWalk, appendRoutePoint, addEvent, updateDistance, endWalk } = useWalkStore();
+  const { activeWalk, appendRoutePoint, addEvent, updateDistance, updateSteps, setWalkPhoto, endWalk } = useWalkStore();
   const { user } = useUserStore();
   const mapRef = useRef<MapView>(null);
   const subRef = useRef<Location.LocationSubscription | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [steps, setSteps] = useState(0);
+  const [walkPhoto, setLocalWalkPhoto] = useState<string | null>(null);
 
   useEffect(() => {
     watchPosition((point) => {
@@ -36,9 +41,21 @@ export default function ActiveWalkScreen() {
       .catch((err) => console.warn("Location watch error:", err));
 
     const timer = setInterval(() => setElapsed((e) => e + 1), 1000);
+
+    let pedometerSub: { remove: () => void } | null = null;
+    Pedometer.isAvailableAsync().then((available) => {
+      if (available) {
+        pedometerSub = Pedometer.watchStepCount((result) => {
+          setSteps(result.steps);
+          updateSteps(result.steps);
+        });
+      }
+    });
+
     return () => {
       subRef.current?.remove();
       clearInterval(timer);
+      pedometerSub?.remove();
     };
   }, []);
 
@@ -66,6 +83,32 @@ export default function ActiveWalkScreen() {
     addEvent({ type, location: { lat: last.lat, lng: last.lng }, ts: Date.now() });
   }
 
+  async function handleTakePhoto() {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== "granted") {
+      Alert.alert(i18n.t("photoPermission"));
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.7,
+      allowsEditing: true,
+      aspect: [1, 1],
+    });
+    if (result.canceled) return;
+    const uri = result.assets[0].uri;
+    setLocalWalkPhoto(uri);
+
+    const walk = useWalkStore.getState().activeWalk;
+    if (!walk) return;
+    try {
+      const url = await uploadWalkPhoto(uri, walk.id);
+      setWalkPhoto(url);
+    } catch {
+      setWalkPhoto(uri);
+    }
+  }
+
   if (!activeWalk) return null;
 
   const coords = activeWalk.route.map((p) => ({ latitude: p.lat, longitude: p.lng }));
@@ -73,10 +116,8 @@ export default function ActiveWalkScreen() {
   const distKm = (activeWalk.distanceMeters / 1000).toFixed(2);
   const mins = Math.floor(elapsed / 60).toString().padStart(2, "0");
   const secs = (elapsed % 60).toString().padStart(2, "0");
-  const groundTemp = activeWalk.weather?.estimatedGroundTemp;
   const pooCount = activeWalk.events.filter((e) => e.type === "poo").length;
   const peeCount = activeWalk.events.filter((e) => e.type === "pee").length;
-  const tempDanger = groundTemp !== undefined && groundTemp >= GROUND_TEMP_DANGER;
 
   return (
     <View style={styles.container}>
@@ -105,16 +146,8 @@ export default function ActiveWalkScreen() {
       <View style={styles.statsBar}>
         <StatItem label={i18n.t("distance")} value={`${distKm} km`} />
         <StatItem label={i18n.t("duration")} value={`${mins}:${secs}`} />
-        {groundTemp !== undefined && (
-          <StatItem label={i18n.t("groundTemp")} value={`${groundTemp.toFixed(0)}°C`} danger={tempDanger} />
-        )}
+        <StatItem label={i18n.t("steps")} value={steps.toString()} />
       </View>
-
-      {tempDanger && (
-        <View style={styles.warningBanner}>
-          <Text style={styles.warningText}>{i18n.t("groundTempWarning")}</Text>
-        </View>
-      )}
 
       <View style={styles.actions}>
         <TouchableOpacity style={[styles.eventBtn, styles.pooBtn]} onPress={() => handleLogEvent("poo")}>
@@ -122,6 +155,16 @@ export default function ActiveWalkScreen() {
         </TouchableOpacity>
         <TouchableOpacity style={[styles.eventBtn, styles.peeBtn]} onPress={() => handleLogEvent("pee")}>
           <Text style={styles.eventBtnText}>💧 {i18n.t("logPee")}{peeCount > 0 ? `  ×${peeCount}` : ""}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.bottomRow}>
+        <TouchableOpacity style={styles.photoBtn} onPress={handleTakePhoto}>
+          {walkPhoto ? (
+            <Image source={{ uri: walkPhoto }} style={styles.photoThumb} />
+          ) : (
+            <Text style={styles.photoBtnText}>📷</Text>
+          )}
         </TouchableOpacity>
         <TouchableOpacity style={styles.endBtn} onPress={handleEnd}>
           <Text style={styles.endBtnText}>{i18n.t("endWalk")}</Text>
@@ -152,13 +195,18 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 11, color: COLORS.textMuted },
   statValue: { fontSize: 18, fontWeight: "700", color: COLORS.text },
   statValueDanger: { color: COLORS.danger },
-  warningBanner: { backgroundColor: COLORS.warning, padding: 10, alignItems: "center" },
-  warningText: { color: "#fff", fontWeight: "700" },
-  actions: { flexDirection: "row", padding: 16, gap: 10, backgroundColor: COLORS.surface },
+  actions: { flexDirection: "row", padding: 12, gap: 10, backgroundColor: COLORS.surface },
   eventBtn: { flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: "center" },
   pooBtn: { backgroundColor: "#8B4513" },
   peeBtn: { backgroundColor: "#3182CE" },
   eventBtnText: { color: "#fff", fontWeight: "600", fontSize: 14 },
-  endBtn: { flex: 1, backgroundColor: COLORS.danger, borderRadius: 12, paddingVertical: 14, alignItems: "center" },
+  bottomRow: { flexDirection: "row", padding: 12, gap: 10, backgroundColor: COLORS.surface, paddingBottom: 20 },
+  photoBtn: {
+    width: 52, height: 52, borderRadius: 12, backgroundColor: COLORS.surface,
+    borderWidth: 2, borderColor: COLORS.primary, alignItems: "center", justifyContent: "center",
+  },
+  photoBtnText: { fontSize: 24 },
+  photoThumb: { width: 48, height: 48, borderRadius: 10 },
+  endBtn: { flex: 1, backgroundColor: COLORS.danger, borderRadius: 12, paddingVertical: 14, alignItems: "center", justifyContent: "center" },
   endBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
 });

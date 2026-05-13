@@ -8,5 +8,3 @@ export const COLORS = {
   text: "#1A202C",
   textMuted: "#718096",
 };
-
-export const GROUND_TEMP_DANGER = 35;

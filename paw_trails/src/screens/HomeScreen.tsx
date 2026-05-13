@@ -13,7 +13,7 @@ import { useUserStore } from "../stores/userStore";
 import { requestPermissions, getCurrentPosition } from "../services/locationService";
 import { fetchWeather } from "../services/weatherService";
 import i18n from "../i18n";
-import { COLORS, GROUND_TEMP_DANGER } from "../constants/theme";
+import { COLORS } from "../constants/theme";
 import * as Crypto from "expo-crypto";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../App";
@@ -105,9 +105,6 @@ export default function HomeScreen() {
       if (!walkWeather) {
         try { walkWeather = await fetchWeather(pos.lat, pos.lng); } catch { /* optional */ }
       }
-      if (walkWeather && walkWeather.estimatedGroundTemp >= GROUND_TEMP_DANGER) {
-        Alert.alert(i18n.t("groundTempWarning"));
-      }
       startWalk({
         id: Crypto.randomUUID(),
         familyId: user?.familyId ?? "local",
@@ -193,14 +190,8 @@ export default function HomeScreen() {
             </View>
             <View style={styles.weatherDivider} />
             <View style={styles.weatherGroundBox}>
-              <Text style={styles.weatherGroundLabel}>{i18n.t("groundTempLabel")}</Text>
-              <Text style={[
-                styles.weatherGroundTemp,
-                weather.estimatedGroundTemp >= GROUND_TEMP_DANGER && styles.weatherGroundDanger,
-              ]}>
-                {Math.round(weather.estimatedGroundTemp)}°C
-                {weather.estimatedGroundTemp >= GROUND_TEMP_DANGER && " ⚠️"}
-              </Text>
+              <Text style={styles.weatherGroundLabel}>{i18n.t("conditionLabel")}</Text>
+              <Text style={styles.weatherGroundTemp}>{weather.condition}</Text>
             </View>
           </View>
         ) : null}

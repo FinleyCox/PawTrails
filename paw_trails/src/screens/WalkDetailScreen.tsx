@@ -1,8 +1,8 @@
 import React, { useRef } from "react";
-import { View, Text, StyleSheet, ScrollView } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Image } from "react-native";
 import MapView, { Polyline, Marker } from "react-native-maps";
 import { useRoute, RouteProp } from "@react-navigation/native";
-import { COLORS, GROUND_TEMP_DANGER } from "../constants/theme";
+import { COLORS } from "../constants/theme";
 import i18n from "../i18n";
 import type { RootStackParamList } from "../../App";
 import type { RoutePoint } from "../models/Walk";
@@ -38,8 +38,6 @@ export default function WalkDetailScreen() {
   const dateStr = date.toLocaleDateString();
   const pooCount = walk.events.filter((e) => e.type === "poo").length;
   const peeCount = walk.events.filter((e) => e.type === "pee").length;
-  const groundTemp = walk.weather?.estimatedGroundTemp;
-  const tempDanger = groundTemp !== undefined && groundTemp >= GROUND_TEMP_DANGER;
 
   return (
     <View style={styles.container}>
@@ -78,12 +76,10 @@ export default function WalkDetailScreen() {
             <Text style={styles.statValue}>{mins}:{String(secs).padStart(2, "0")}</Text>
             <Text style={styles.statLabel}>{i18n.t("duration")}</Text>
           </View>
-          {groundTemp !== undefined && (
+          {walk.steps != null && walk.steps > 0 && (
             <View style={styles.statBox}>
-              <Text style={[styles.statValue, tempDanger && styles.danger]}>
-                {Math.round(groundTemp)}°C
-              </Text>
-              <Text style={styles.statLabel}>{i18n.t("groundTempLabel")}</Text>
+              <Text style={styles.statValue}>{walk.steps.toLocaleString()}</Text>
+              <Text style={styles.statLabel}>{i18n.t("steps")}</Text>
             </View>
           )}
         </View>
@@ -105,6 +101,10 @@ export default function WalkDetailScreen() {
             <Text style={styles.noEvents}>{i18n.t("eventsLabel")}: 0</Text>
           )}
         </View>
+
+        {!!walk.photoUrl && (
+          <Image source={{ uri: walk.photoUrl }} style={styles.walkPhoto} resizeMode="cover" />
+        )}
       </ScrollView>
     </View>
   );
@@ -116,17 +116,17 @@ const styles = StyleSheet.create({
   noMap: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surface },
   noMapText: { fontSize: 64 },
   noMapSub: { color: COLORS.textMuted, marginTop: 8 },
-  statsSheet: { maxHeight: 220, backgroundColor: COLORS.background },
+  statsSheet: { maxHeight: 280, backgroundColor: COLORS.background },
   statsContent: { padding: 20 },
   dateText: { fontSize: 14, color: COLORS.textMuted, marginBottom: 16 },
   statRow: { flexDirection: "row", justifyContent: "space-around", marginBottom: 16 },
   statBox: { alignItems: "center" },
   statValue: { fontSize: 24, fontWeight: "700", color: COLORS.text },
   statLabel: { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
-  danger: { color: COLORS.danger },
-  eventRow: { flexDirection: "row", gap: 16 },
+  eventRow: { flexDirection: "row", gap: 16, marginBottom: 16 },
   eventBadge: { flexDirection: "row", alignItems: "center", gap: 4 },
   eventEmoji: { fontSize: 20 },
   eventCount: { fontSize: 16, fontWeight: "600", color: COLORS.text },
   noEvents: { color: COLORS.textMuted, fontSize: 14 },
+  walkPhoto: { width: "100%", height: 200, borderRadius: 12 },
 });
