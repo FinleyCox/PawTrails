@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "544502055501",
+    "project_id": "kithpaw-kithpaw",
+    "storage_bucket": "kithpaw-kithpaw.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:544502055501:android:b0342e19de28dfa34dd204",
+        "android_client_info": {
+          "package_name": "com.ain0315.kithpaw"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "544502055501-4ooe4r232nuqkvrpg1mbktalje3k68io.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ain0315.kithpaw",
+            "certificate_hash": "fa7fb2832dcd3fa7c10fc069c48d58b9d189b722"
+          }
+        },
+        {
+          "client_id": "544502055501-1i0iffnp6ld157qbcnbphipa6ttbosri.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCz35o_Hz6GU6J7hULQ8hMaxhz2r90-N8I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "544502055501-1i0iffnp6ld157qbcnbphipa6ttbosri.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
