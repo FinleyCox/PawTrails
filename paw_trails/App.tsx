@@ -4,7 +4,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { Text, ActivityIndicator, View } from "react-native";
+import { Text, View } from "react-native";
 import type { User as FirebaseUser } from "firebase/auth";
 
 import HomeScreen from "./src/screens/HomeScreen";
@@ -17,13 +17,16 @@ import SubscriptionScreen from "./src/screens/SubscriptionScreen";
 import FamilySetupScreen from "./src/screens/FamilySetupScreen";
 import DogEditScreen from "./src/screens/DogEditScreen";
 import WalkDetailScreen from "./src/screens/WalkDetailScreen";
+import PhotosScreen from "./src/screens/PhotosScreen";
+import AppSplashScreen from "./src/components/AppSplashScreen";
 import { subscribeAuth } from "./src/services/authService";
 import { getUserDoc, subscribeDogs, subscribeWalks } from "./src/services/firestoreService";
 import { useUserStore } from "./src/stores/userStore";
 import { useDogStore } from "./src/stores/dogStore";
 import { useWalkStore } from "./src/stores/walkStore";
 import i18n from "./src/i18n";
-import { COLORS } from "./src/constants/theme";
+import { useThemeStore } from "./src/stores/themeStore";
+import { Home, History, Settings, Camera } from "lucide-react-native";
 import type { Dog } from "./src/models/Dog";
 import type { Walk } from "./src/models/Walk";
 
@@ -42,6 +45,7 @@ export type SettingsParamList = {
 export type TabParamList = {
   Home: undefined;
   Walks: undefined;
+  Photos: undefined;
   SettingsTab: undefined;
 };
 
@@ -50,40 +54,32 @@ const Tab = createBottomTabNavigator<TabParamList>();
 const SettingsNav = createNativeStackNavigator<SettingsParamList>();
 
 function SettingsNavigator() {
+  const { colors } = useThemeStore();
   return (
     <SettingsNav.Navigator
       screenOptions={{
-        headerStyle: { backgroundColor: COLORS.primary },
+        headerStyle: { backgroundColor: colors.primary },
         headerTintColor: "#fff",
       }}
     >
-      <SettingsNav.Screen
-        name="SettingsMain"
-        component={SettingsScreen}
-        options={{ title: i18n.t("settings") }}
-      />
-      <SettingsNav.Screen
-        name="FamilySetup"
-        component={FamilySetupScreen}
-        options={{ title: i18n.t("familySetup") }}
-      />
-      <SettingsNav.Screen
-        name="DogEdit"
-        component={DogEditScreen}
-        options={{ title: i18n.t("editDog") }}
-      />
+      <SettingsNav.Screen name="SettingsMain" component={SettingsScreen} options={{ title: i18n.t("settings") }} />
+      <SettingsNav.Screen name="FamilySetup" component={FamilySetupScreen} options={{ title: i18n.t("familySetup") }} />
+      <SettingsNav.Screen name="DogEdit" component={DogEditScreen} options={{ title: i18n.t("editDog") }} />
     </SettingsNav.Navigator>
   );
 }
 
 function Tabs() {
+  const { colors } = useThemeStore();
   return (
     <Tab.Navigator
       screenOptions={{
-        tabBarActiveTintColor: COLORS.primary,
-        tabBarInactiveTintColor: COLORS.textMuted,
-        headerStyle: { backgroundColor: COLORS.primary },
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textMuted,
+        tabBarStyle: { backgroundColor: "#FFFFFF", borderTopColor: "#EEEEEE" },
+        headerStyle: { backgroundColor: colors.primary },
         headerTintColor: "#fff",
+        headerTitleStyle: { fontWeight: "700" },
       }}
     >
       <Tab.Screen
@@ -91,7 +87,7 @@ function Tabs() {
         component={HomeScreen}
         options={{
           title: i18n.t("home"),
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>🐾</Text>,
+          tabBarIcon: ({ color, size }) => <Home size={size} color={color} strokeWidth={1.8} />,
         }}
       />
       <Tab.Screen
@@ -99,7 +95,15 @@ function Tabs() {
         component={WalkHistoryScreen}
         options={{
           title: i18n.t("walks"),
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>🗺️</Text>,
+          tabBarIcon: ({ color, size }) => <History size={size} color={color} strokeWidth={1.8} />,
+        }}
+      />
+      <Tab.Screen
+        name="Photos"
+        component={PhotosScreen}
+        options={{
+          title: "写真",
+          tabBarIcon: ({ color, size }) => <Camera size={size} color={color} strokeWidth={1.8} />,
         }}
       />
       <Tab.Screen
@@ -108,7 +112,7 @@ function Tabs() {
         options={{
           headerShown: false,
           title: i18n.t("settings"),
-          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>⚙️</Text>,
+          tabBarIcon: ({ color, size }) => <Settings size={size} color={color} strokeWidth={1.8} />,
         }}
       />
     </Tab.Navigator>
@@ -121,19 +125,27 @@ export default function App() {
   const { user, setUser, clearUser } = useUserStore();
   const { dogs, setDogs } = useDogStore();
   const { setWalks } = useWalkStore();
+  const { colors } = useThemeStore();
   const [authUser, setAuthUser] = useState<FirebaseUser | null | undefined>(undefined);
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>("done");
+  const [dataReady, setDataReady] = useState(false);
   const dogsEverLoadedRef = useRef(false);
 
   useEffect(() => {
     const unsub = subscribeAuth(async (firebaseUser) => {
       setAuthUser(firebaseUser);
       if (firebaseUser) {
-        try {
-          let data = await getUserDoc(firebaseUser.uid);
+        // 即時に仮ユーザーをセット → 犬/散歩サブスクがすぐ始まる
+        setUser({
+          id: firebaseUser.uid,
+          displayName: firebaseUser.displayName ?? "",
+          familyId: firebaseUser.uid,
+          settings: { metricSystem: true, privacyMasking: true, language: "ja" },
+        });
+        // Firestore からフル情報を取得して上書き（バックグラウンド）
+        getUserDoc(firebaseUser.uid).then(async (data) => {
           if (!data) {
-            // Race condition on new registration: onAuthStateChanged fires before
-            // createUserDoc completes. Retry once after a short wait.
+            // 新規登録直後のレースコンディション対策
             await new Promise((r) => setTimeout(r, 1500));
             data = await getUserDoc(firebaseUser.uid);
           }
@@ -144,23 +156,14 @@ export default function App() {
               familyId: data.familyId,
               settings: data.settings,
             });
-          } else {
-            // Still no doc — fall back to auth data with default familyId = uid
-            setUser({
-              id: firebaseUser.uid,
-              displayName: firebaseUser.displayName ?? "",
-              familyId: firebaseUser.uid,
-              settings: { metricSystem: true, privacyMasking: true, language: "ja" },
-            });
           }
-        } catch (e) {
-          console.error("getUserDoc failed:", e);
-        }
+        }).catch((e) => console.error("getUserDoc failed:", e));
       } else {
         clearUser();
         setDogs([]);
         setWalks([]);
         setOnboardingStep("done");
+        setDataReady(false);
         dogsEverLoadedRef.current = false;
       }
     });
@@ -171,9 +174,9 @@ export default function App() {
     if (!user?.familyId) return;
     const unsubDogs = subscribeDogs(user.familyId, (loadedDogs: Dog[]) => {
       setDogs(loadedDogs);
+      setDataReady(true); // 初回スナップショット到着 → ローディング終了
       if (loadedDogs.length > 0) {
         dogsEverLoadedRef.current = true;
-        // if we were on onboarding waiting for the dog, proceed to done
         setOnboardingStep((prev) => (prev === "dog" ? "done" : prev));
       } else if (!dogsEverLoadedRef.current) {
         setOnboardingStep("dog");
@@ -187,11 +190,12 @@ export default function App() {
   }, [user?.familyId]);
 
   if (authUser === undefined) {
-    return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: COLORS.background }}>
-        <ActivityIndicator color={COLORS.primary} size="large" />
-      </View>
-    );
+    return <AppSplashScreen />;
+  }
+
+  // 認証済みだがFirestoreデータ未到着 → スプラッシュ継続
+  if (authUser && !dataReady) {
+    return <AppSplashScreen />;
   }
 
   if (!authUser) {
@@ -235,8 +239,9 @@ export default function App() {
             component={ActiveWalkScreen}
             options={{
               title: i18n.t("startWalk"),
-              headerStyle: { backgroundColor: COLORS.primary },
+              headerStyle: { backgroundColor: colors.primary },
               headerTintColor: "#fff",
+              headerTitleStyle: { fontWeight: "700" },
               gestureEnabled: false,
             }}
           />
@@ -245,8 +250,9 @@ export default function App() {
             component={WalkDetailScreen}
             options={{
               title: i18n.t("walkDetail"),
-              headerStyle: { backgroundColor: COLORS.primary },
+              headerStyle: { backgroundColor: colors.primary },
               headerTintColor: "#fff",
+              headerTitleStyle: { fontWeight: "700" },
             }}
           />
         </Stack.Navigator>

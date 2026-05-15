@@ -8,7 +8,7 @@ export async function requestPermissions(): Promise<boolean> {
 
 export async function getCurrentPosition(): Promise<RoutePoint> {
   const loc = await Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.High,
+    accuracy: Location.Accuracy.BestForNavigation,
   });
   return {
     lat: loc.coords.latitude,
@@ -17,21 +17,36 @@ export async function getCurrentPosition(): Promise<RoutePoint> {
   };
 }
 
+const MIN_DISTANCE_METERS = 8;
+const MAX_ACCURACY_METERS = 20;
+
 export function watchPosition(
   callback: (point: RoutePoint) => void
 ): Promise<Location.LocationSubscription> {
+  let lastPoint: RoutePoint | null = null;
+
   return Location.watchPositionAsync(
     {
-      accuracy: Location.Accuracy.High,
-      timeInterval: 3000,
-      distanceInterval: 5,
+      accuracy: Location.Accuracy.BestForNavigation,
+      timeInterval: 2000,
+      distanceInterval: MIN_DISTANCE_METERS,
     },
-    (loc) =>
-      callback({
+    (loc) => {
+      // 精度が悪いポイントは無視
+      if (loc.coords.accuracy != null && loc.coords.accuracy > MAX_ACCURACY_METERS) return;
+
+      const point: RoutePoint = {
         lat: loc.coords.latitude,
         lng: loc.coords.longitude,
         ts: loc.timestamp,
-      })
+      };
+
+      // 前のポイントと近すぎる場合はスキップ（GPSブレ対策）
+      if (lastPoint && haversine(lastPoint, point) < MIN_DISTANCE_METERS) return;
+
+      lastPoint = point;
+      callback(point);
+    }
   );
 }
 

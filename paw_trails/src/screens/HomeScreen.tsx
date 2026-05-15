@@ -1,32 +1,48 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import {
   View, Text, TouchableOpacity, StyleSheet, Alert, Image,
-  ScrollView, ActivityIndicator,
+  ScrollView, ActivityIndicator, Animated,
 } from "react-native";
 import MapView, { Polyline } from "react-native-maps";
+import { LinearGradient } from "expo-linear-gradient";
+import NetInfo from "@react-native-community/netinfo";
+import { Sun, Cloud, CloudRain, Snowflake, Wind, PawPrint, Plus } from "lucide-react-native";
+import SkeletonBox from "../components/SkeletonBox";
 import AddDogModal from "../components/AddDogModal";
 import PaywallModal from "../components/PaywallModal";
 import { useNavigation } from "@react-navigation/native";
 import { useDogStore } from "../stores/dogStore";
 import { useWalkStore } from "../stores/walkStore";
 import { useUserStore } from "../stores/userStore";
+import { useThemeStore } from "../stores/themeStore";
 import { requestPermissions, getCurrentPosition } from "../services/locationService";
 import { fetchWeather } from "../services/weatherService";
 import i18n from "../i18n";
-import { COLORS } from "../constants/theme";
 import * as Crypto from "expo-crypto";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../App";
 import type { WeatherSnapshot, RoutePoint } from "../models/Walk";
+import type { Dog } from "../models/Dog";
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-function conditionEmoji(c: string) {
-  const map: Record<string, string> = {
-    Clear: "☀️", Clouds: "☁️", Rain: "🌧️", Drizzle: "🌦️",
-    Thunderstorm: "⛈️", Snow: "❄️", Mist: "🌫️", Fog: "🌫️",
-  };
-  return map[c] ?? "🌤️";
+function pawSignal(temp: number, condition: string): { label: string; color: string } {
+  // 雨・雪はアスファルトが冷えるため安全
+  if (condition === "Rain" || condition === "Drizzle" || condition === "Snow") {
+    return { label: "🌧 路面は安全", color: "#5C8F72" };
+  }
+  if (temp < 25) return { label: "✅ 路面は安全", color: "#5C8F72" };
+  if (temp < 30) return { label: "⚠️ やや熱い", color: "#F59E0B" };
+  if (temp < 35) return { label: "🔴 危険・早朝/夕方のみ", color: "#EF4444" };
+  return { label: "🚫 散歩不可", color: "#DC2626" };
+}
+
+function WeatherIcon({ condition, size, color }: { condition: string; size: number; color: string }) {
+  if (condition === "Clear") return <Sun size={size} color={color} />;
+  if (condition === "Rain" || condition === "Drizzle") return <CloudRain size={size} color={color} />;
+  if (condition === "Snow") return <Snowflake size={size} color={color} />;
+  if (condition === "Mist" || condition === "Fog") return <Wind size={size} color={color} />;
+  return <Cloud size={size} color={color} />;
 }
 
 function routeRegion(route: RoutePoint[]) {
@@ -48,54 +64,56 @@ export default function HomeScreen() {
   const { dogs, selectedDogIds, toggleDogSelection } = useDogStore();
   const { startWalk, walks } = useWalkStore();
   const { user } = useUserStore();
+  const { colors } = useThemeStore();
+
   const [loading, setLoading] = useState(false);
   const [showAddDog, setShowAddDog] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(true);
 
-  const singleDog = dogs.length === 1 ? dogs[0] : null;
   const isPremium = user?.settings?.isPremium === true;
 
-  // Today's completed walks
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const todayWalks = walks.filter((w) => w.startedAt >= todayStart.getTime() && w.endedAt != null);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function loadWeather() {
-      try {
-        const granted = await requestPermissions();
-        if (!granted || cancelled) return;
-        const pos = await getCurrentPosition();
-        if (cancelled) return;
-        const w = await fetchWeather(pos.lat, pos.lng);
-        if (!cancelled) setWeather(w);
-      } catch {
-        // weather is optional
-      } finally {
-        if (!cancelled) setWeatherLoading(false);
-      }
+  const loadWeather = useCallback(async () => {
+    try {
+      const granted = await requestPermissions();
+      if (!granted) return;
+      const pos = await getCurrentPosition();
+      const w = await fetchWeather(pos.lat, pos.lng);
+      setWeather(w);
+    } catch { /* optional */ } finally {
+      setWeatherLoading(false);
     }
-    loadWeather();
-    return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => { loadWeather(); }, []);
+
+  useEffect(() => {
+    const unsub = NetInfo.addEventListener((state) => {
+      if (state.isConnected && !weather) { setWeatherLoading(true); loadWeather(); }
+    });
+    return unsub;
+  }, [weather]);
+
   function handleAddDog() {
-    if (!isPremium && dogs.length >= 1) {
-      setShowPaywall(true);
-    } else {
-      setShowAddDog(true);
-    }
+    if (!isPremium && dogs.length >= 1) setShowPaywall(true);
+    else setShowAddDog(true);
   }
 
-  async function handleStartWalk() {
-    const dogIds = singleDog ? [singleDog.id] : selectedDogIds;
-    if (dogIds.length === 0) {
-      Alert.alert(i18n.t("selectDogs"));
-      return;
-    }
+  const activeDogIds = dogs.length === 1 ? [dogs[0].id] : selectedDogIds;
+  const activeDogs = dogs.filter((d) => activeDogIds.includes(d.id));
+
+  function startButtonLabel() {
+    if (activeDogs.length === 0) return i18n.t("startWalk");
+    if (activeDogs.length === 1) return `${activeDogs[0].name}と散歩に行く`;
+    return `${activeDogs.map((d) => d.name).join("・")}と散歩に行く`;
+  }
+
+  async function doStartWalk(dogIds: string[]) {
     setLoading(true);
     try {
       const granted = await requestPermissions();
@@ -124,220 +142,299 @@ export default function HomeScreen() {
     }
   }
 
+  async function handleStartWalk() {
+    if (activeDogIds.length === 0) {
+      Alert.alert(
+        i18n.t("selectDogs"),
+        "ホーム画面のアイコンをタップして選んでください",
+        [{ text: "OK" }]
+      );
+      return;
+    }
+    await doStartWalk(activeDogIds);
+  }
+
+  const s = makeStyles(colors);
+
+  // マウント直後にフェードイン（天気を待たない）
+  const contentOpacity = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(contentOpacity, { toValue: 1, duration: 350, useNativeDriver: true }).start();
+  }, []);
+
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+    <View style={s.container}>
+      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
         {/* Header */}
-        <View style={styles.headerRow}>
-          <Text style={styles.title}>
-            {singleDog ? i18n.t("walkingWith", { name: singleDog.name }) : i18n.t("selectDogs")}
-          </Text>
-          <TouchableOpacity style={styles.addButton} onPress={handleAddDog}>
-            <Text style={styles.addButtonText}>＋ {i18n.t("addDog")}</Text>
+        <View style={s.headerRow}>
+          <TouchableOpacity style={s.addBtn} onPress={handleAddDog}>
+            <Plus size={18} color={colors.primary} />
+            <Text style={[s.addBtnLabel, { color: colors.primary }]}>うちの子を追加</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Dog section */}
+        <Animated.View style={{ opacity: contentOpacity }}>
+        {/* Dog profile */}
         {dogs.length === 0 ? (
-          <Text style={styles.empty}>{i18n.t("noDogs")}</Text>
-        ) : singleDog ? (
-          <View style={styles.singleDogCard}>
-            {singleDog.photoUrl ? (
-              <Image source={{ uri: singleDog.photoUrl }} style={styles.singleDogPhoto} />
-            ) : (
-              <View style={styles.singleDogPlaceholder}><Text style={{ fontSize: 40 }}>🐾</Text></View>
-            )}
-            <Text style={styles.singleDogName}>{singleDog.name}</Text>
-            {!!singleDog.breed && <Text style={styles.dogBreed}>{singleDog.breed}</Text>}
+          <View style={s.emptyDog}>
+            <View style={s.emptyDogRing}>
+              <PawPrint size={40} color={colors.primary} />
+            </View>
+            <Text style={s.emptyDogText}>{i18n.t("noDogs")}</Text>
+          </View>
+        ) : dogs.length === 1 ? (
+          <View style={s.dogCenter}>
+            <View style={[s.dogRing, { borderColor: colors.primary }]}>
+              {dogs[0].photoUrl
+                ? <Image source={{ uri: dogs[0].photoUrl }} style={s.dogPhoto} />
+                : <View style={[s.dogPhotoPlaceholder, { backgroundColor: colors.background }]}><PawPrint size={40} color={colors.primary} /></View>
+              }
+            </View>
+            <Text style={s.dogName}>{dogs[0].name}</Text>
+            {!!dogs[0].breed && <Text style={s.dogBreed}>{dogs[0].breed}</Text>}
           </View>
         ) : (
-          dogs.map((dog) => {
-            const selected = selectedDogIds.includes(dog.id);
-            return (
-              <TouchableOpacity
-                key={dog.id}
-                style={[styles.dogCard, selected && styles.dogCardSelected]}
-                onPress={() => toggleDogSelection(dog.id)}
-              >
-                {dog.photoUrl ? (
-                  <Image source={{ uri: dog.photoUrl }} style={styles.dogPhoto} />
-                ) : (
-                  <View style={styles.dogPhotoPlaceholder}><Text style={{ fontSize: 22 }}>🐾</Text></View>
-                )}
-                <View style={styles.dogInfo}>
-                  <Text style={[styles.dogName, selected && styles.dogNameSelected]}>{dog.name}</Text>
-                  {!!dog.breed && <Text style={styles.dogBreed}>{dog.breed}</Text>}
-                </View>
-                {selected && <Text style={styles.checkmark}>✓</Text>}
-              </TouchableOpacity>
-            );
-          })
+          <View style={s.avatarRow}>
+            {dogs.map((dog) => {
+              const selected = selectedDogIds.includes(dog.id);
+              return (
+                <TouchableOpacity key={dog.id} style={s.avatarWrap} onPress={() => toggleDogSelection(dog.id)}>
+                  <View style={s.avatarOuter}>
+                    <View style={[s.avatarRing, selected && { borderColor: colors.primary }]}>
+                      {dog.photoUrl
+                        ? <Image source={{ uri: dog.photoUrl }} style={s.avatarImg} />
+                        : <View style={s.avatarPlaceholder}><PawPrint size={22} color={colors.primary} /></View>
+                      }
+                    </View>
+                    {selected && <Text style={s.flowerBadge}>🌸</Text>}
+                  </View>
+                  <Text style={[s.avatarName, selected && { color: colors.primary, fontWeight: "700" }]} numberOfLines={1}>
+                    {dog.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         )}
 
-        {/* Weather widget */}
+        {/* Weather card */}
         {weatherLoading ? (
-          <View style={styles.weatherCard}>
-            <ActivityIndicator color={COLORS.primary} size="small" />
-            <Text style={styles.weatherLoadingText}>{i18n.t("weatherLoading")}</Text>
+          <View style={[s.weatherCard, { gap: 12 }]}>
+            <View style={{ flex: 1, gap: 8 }}>
+              <SkeletonBox style={{ height: 28, width: 80, borderRadius: 8 }} />
+              <SkeletonBox style={{ height: 14, width: 60, borderRadius: 6 }} />
+            </View>
+            <View style={[s.weatherDivider, { backgroundColor: colors.border }]} />
+            <View style={{ flex: 1, gap: 8 }}>
+              <SkeletonBox style={{ height: 14, width: 70, borderRadius: 6 }} />
+              <SkeletonBox style={{ height: 14, width: 100, borderRadius: 6 }} />
+            </View>
           </View>
         ) : weather ? (
-          <View style={styles.weatherCard}>
-            <Text style={styles.weatherEmoji}>{conditionEmoji(weather.condition)}</Text>
-            <View style={styles.weatherInfo}>
-              <Text style={styles.weatherTemp}>{Math.round(weather.temp)}°C</Text>
-              <Text style={styles.weatherCondition}>{weather.condition}</Text>
+          <View style={s.weatherCard}>
+            <View style={s.weatherLeft}>
+              <WeatherIcon condition={weather.condition} size={32} color="#FFB347" />
+              <View style={{ marginLeft: 12 }}>
+                <Text style={s.weatherTemp}>{Math.round(weather.temp)}°C</Text>
+                <Text style={s.weatherCondition}>{weather.condition}</Text>
+              </View>
             </View>
-            <View style={styles.weatherDivider} />
-            <View style={styles.weatherGroundBox}>
-              <Text style={styles.weatherGroundLabel}>{i18n.t("conditionLabel")}</Text>
-              <Text style={styles.weatherGroundTemp}>{weather.condition}</Text>
+            <View style={[s.weatherDivider, { backgroundColor: colors.border }]} />
+            <View style={s.weatherRight}>
+              {(() => {
+                const paw = pawSignal(weather.temp, weather.condition);
+                return (
+                  <>
+                    <PawPrint size={28} color={paw.color} />
+                    <View style={{ marginLeft: 10 }}>
+                      <Text style={s.pawLabel}>Paw Signal</Text>
+                      <Text style={[s.pawStatus, { color: paw.color }]}>{paw.label}</Text>
+                    </View>
+                  </>
+                );
+              })()}
             </View>
           </View>
         ) : null}
 
         {/* Today's walks */}
-        <Text style={styles.sectionTitle}>{i18n.t("todayWalks")}</Text>
+        <Text style={s.sectionTitle}>{i18n.t("todayWalks")}</Text>
         {todayWalks.length === 0 ? (
-          <Text style={styles.empty}>{i18n.t("noWalksToday")}</Text>
+          <Text style={s.emptyText}>{i18n.t("noWalksToday")}</Text>
         ) : (
           todayWalks.map((walk) => {
             const durationMs = (walk.endedAt ?? Date.now()) - walk.startedAt;
             const mins = Math.floor(durationMs / 60000);
             const distKm = (walk.distanceMeters / 1000).toFixed(2);
             const coords = walk.route.map((p) => ({ latitude: p.lat, longitude: p.lng }));
+            const timeStr = new Date(walk.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+            const walkDogs = dogs.filter((d) => walk.dogIds.includes(d.id));
+            const dogNames = walkDogs.map((d) => d.name).join("・");
+            const firstDog = walkDogs[0];
             return (
-              <TouchableOpacity key={walk.id} style={styles.walkCard} onPress={() => navigation.navigate("WalkDetail", { walk })}>
-                {walk.route.length > 1 && (
+              <TouchableOpacity key={walk.id} style={s.walkCard} onPress={() => navigation.navigate("WalkDetail", { walk })}>
+                <View style={s.walkCardHeader}>
+                  {/* サムネイル：写真 or 犬アイコン */}
+                  {walk.photoUrl ? (
+                    <Image source={{ uri: walk.photoUrl }} style={s.walkThumb} />
+                  ) : firstDog?.photoUrl ? (
+                    <Image source={{ uri: firstDog.photoUrl }} style={s.walkThumb} />
+                  ) : (
+                    <View style={[s.walkThumbPlaceholder, { backgroundColor: colors.background }]}>
+                      <PawPrint size={24} color={colors.primary} />
+                    </View>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.walkCardTitle}>{timeStr}</Text>
+                    {!!dogNames && <Text style={[s.walkCardDogs, { color: colors.primary }]}>{dogNames}</Text>}
+                  </View>
+                  <Text style={s.walkChevron}>›</Text>
+                </View>
+                {walk.photoUrl ? (
+                  <Image source={{ uri: walk.photoUrl }} style={s.miniMap} resizeMode="cover" />
+                ) : firstDog?.photoUrl ? (
+                  <Image source={{ uri: firstDog.photoUrl }} style={s.miniMap} resizeMode="cover" />
+                ) : firstDog ? (
+                  <View style={[s.miniMapPlaceholder, { backgroundColor: colors.background }]}>
+                    <PawPrint size={48} color={colors.primary} />
+                    <Text style={[s.miniMapDogName, { color: colors.primary }]}>{firstDog.name}</Text>
+                  </View>
+                ) : walk.route.length > 1 ? (
                   <MapView
-                    style={styles.miniMap}
+                    style={s.miniMap}
                     initialRegion={routeRegion(walk.route)}
-                    scrollEnabled={false}
-                    zoomEnabled={false}
-                    rotateEnabled={false}
-                    pitchEnabled={false}
-                    pointerEvents="none"
+                    scrollEnabled={false} zoomEnabled={false} rotateEnabled={false}
+                    pitchEnabled={false} pointerEvents="none"
                   >
-                    <Polyline coordinates={coords} strokeColor={COLORS.primary} strokeWidth={3} />
+                    <Polyline coordinates={coords} strokeColor={colors.primary} strokeWidth={3} />
                   </MapView>
-                )}
-                <View style={styles.walkStats}>
-                  <Text style={styles.walkStat}>{distKm} km</Text>
-                  <Text style={styles.walkStatSep}>·</Text>
-                  <Text style={styles.walkStat}>{mins} {i18n.t("min")}</Text>
-                  <Text style={styles.walkStatSep}>·</Text>
-                  <Text style={styles.walkStat}>{walk.events.length} {i18n.t("eventsLabel")}</Text>
+                ) : null}
+                <View style={s.walkStats}>
+                  <Text style={s.walkStat}>{distKm} km</Text>
+                  <Text style={s.walkStatDot}>·</Text>
+                  <Text style={s.walkStat}>{mins} {i18n.t("min")}</Text>
+                  {(walk.steps ?? 0) > 0 && <>
+                    <Text style={s.walkStatDot}>·</Text>
+                    <Text style={s.walkStat}>👟 {walk.steps?.toLocaleString()}</Text>
+                  </>}
                 </View>
               </TouchableOpacity>
             );
           })
         )}
+
+        <View style={{ height: 120 }} />
+        </Animated.View>
       </ScrollView>
 
-      {/* Sticky start button */}
-      <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.startButton, loading && styles.startButtonDisabled]}
-          onPress={handleStartWalk}
-          disabled={loading}
-        >
-          <Text style={styles.startButtonText}>
-            {loading ? "..." : i18n.t("startWalk")}
-          </Text>
+      {/* Gradient start button */}
+      <View style={s.footer}>
+        <TouchableOpacity onPress={handleStartWalk} disabled={loading} activeOpacity={0.85}>
+          <LinearGradient
+            colors={loading ? ["#AAAAAA", "#BBBBBB"] : colors.primaryGradient}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={s.startBtn}
+          >
+            {loading
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={s.startBtnText}>{startButtonLabel()}</Text>
+            }
+          </LinearGradient>
         </TouchableOpacity>
       </View>
 
       <AddDogModal visible={showAddDog} onClose={() => setShowAddDog(false)} />
-      <PaywallModal
-        visible={showPaywall}
-        onClose={() => setShowPaywall(false)}
-        onSubscribed={() => setShowAddDog(true)}
-      />
+      <PaywallModal visible={showPaywall} onClose={() => setShowPaywall(false)} onSubscribed={() => setShowAddDog(true)} />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  scroll: { padding: 20, paddingBottom: 8 },
-  headerRow: {
-    flexDirection: "row", justifyContent: "space-between",
-    alignItems: "center", marginBottom: 16,
-  },
-  title: { fontSize: 17, fontWeight: "700", color: COLORS.text, flex: 1, marginRight: 8 },
-  addButton: {
-    backgroundColor: COLORS.primary, borderRadius: 20,
-    paddingHorizontal: 14, paddingVertical: 6,
-  },
-  addButtonText: { color: "#fff", fontSize: 14, fontWeight: "600" },
-  empty: { color: COLORS.textMuted, marginBottom: 16 },
-  // Single dog
-  singleDogCard: { alignItems: "center", paddingVertical: 24, marginBottom: 16 },
-  singleDogPhoto: { width: 100, height: 100, borderRadius: 50, marginBottom: 12 },
-  singleDogPlaceholder: {
-    width: 100, height: 100, borderRadius: 50,
-    backgroundColor: COLORS.surface, alignItems: "center",
-    justifyContent: "center", marginBottom: 12,
-  },
-  singleDogName: { fontSize: 20, fontWeight: "700", color: COLORS.text },
-  // Multi dog
-  dogCard: {
-    backgroundColor: COLORS.surface, borderRadius: 12, padding: 14,
-    marginBottom: 10, borderWidth: 2, borderColor: "transparent",
-    flexDirection: "row", alignItems: "center",
-  },
-  dogCardSelected: { borderColor: COLORS.primary },
-  dogPhoto: { width: 48, height: 48, borderRadius: 24, marginRight: 12 },
-  dogPhotoPlaceholder: {
-    width: 48, height: 48, borderRadius: 24, backgroundColor: "#F0F0F0",
-    alignItems: "center", justifyContent: "center", marginRight: 12,
-  },
-  dogInfo: { flex: 1 },
-  dogName: { fontSize: 16, fontWeight: "600", color: COLORS.text },
-  dogNameSelected: { color: COLORS.primary },
-  dogBreed: { fontSize: 13, color: COLORS.textMuted, marginTop: 2 },
-  checkmark: { fontSize: 20, color: COLORS.primary, fontWeight: "700" },
-  // Weather
-  weatherCard: {
-    backgroundColor: COLORS.surface, borderRadius: 16, padding: 16,
-    flexDirection: "row", alignItems: "center", marginBottom: 24, gap: 12,
-  },
-  weatherEmoji: { fontSize: 36 },
-  weatherInfo: { flex: 1 },
-  weatherTemp: { fontSize: 22, fontWeight: "700", color: COLORS.text },
-  weatherCondition: { fontSize: 13, color: COLORS.textMuted },
-  weatherDivider: { width: 1, height: 40, backgroundColor: "#E2E8F0" },
-  weatherGroundBox: { alignItems: "center", minWidth: 70 },
-  weatherGroundLabel: { fontSize: 11, color: COLORS.textMuted, marginBottom: 2 },
-  weatherGroundTemp: { fontSize: 16, fontWeight: "700", color: COLORS.text },
-  weatherGroundDanger: { color: COLORS.danger },
-  weatherLoadingText: { color: COLORS.textMuted, fontSize: 13, marginLeft: 8 },
-  // Section
-  sectionTitle: { fontSize: 14, fontWeight: "700", color: COLORS.text, marginBottom: 12 },
-  // Walk cards
-  walkCard: {
-    backgroundColor: COLORS.surface, borderRadius: 16, marginBottom: 12,
-    overflow: "hidden",
-  },
-  miniMap: { height: 160, width: "100%" },
-  walkStats: {
-    flexDirection: "row", alignItems: "center", padding: 12,
-    gap: 6,
-  },
-  walkStat: { fontSize: 13, fontWeight: "600", color: COLORS.text },
-  walkStatSep: { fontSize: 13, color: COLORS.textMuted },
-  // Footer
-  footer: {
-    padding: 16,
-    paddingBottom: 24,
-    backgroundColor: COLORS.background,
-    borderTopWidth: 1,
-    borderTopColor: "#F0F0F0",
-  },
-  startButton: {
-    backgroundColor: COLORS.primary, borderRadius: 16,
-    paddingVertical: 18, alignItems: "center",
-  },
-  startButtonDisabled: { opacity: 0.5 },
-  startButtonText: { color: "#fff", fontSize: 18, fontWeight: "700" },
-});
+function makeStyles(c: ReturnType<typeof useThemeStore>["colors"]) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    scroll: { paddingHorizontal: 24, paddingTop: 8, paddingBottom: 8 },
+
+    headerRow: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center", marginBottom: 20 },
+    addBtn: {
+      flexDirection: "row", alignItems: "center", gap: 6,
+      backgroundColor: c.surface, borderWidth: 1, borderColor: c.border,
+      borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8,
+    },
+    addBtnLabel: { fontSize: 13, fontWeight: "600" },
+
+    // Dog - single
+    dogCenter: { alignItems: "center", marginBottom: 28 },
+    dogRing: {
+      width: 130, height: 130, borderRadius: 65, borderWidth: 2.5, overflow: "hidden", marginBottom: 12,
+      shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.15, shadowRadius: 12, elevation: 8,
+    },
+    dogPhoto: { width: "100%", height: "100%" },
+    dogPhotoPlaceholder: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center" },
+    dogName: { fontSize: 24, fontWeight: "700", color: c.text },
+    dogBreed: { fontSize: 14, color: c.textMuted, marginTop: 4 },
+
+    // Dog - empty
+    emptyDog: { alignItems: "center", marginBottom: 28 },
+    emptyDogRing: {
+      width: 100, height: 100, borderRadius: 50,
+      backgroundColor: c.surface, borderWidth: 1.5, borderColor: c.border,
+      alignItems: "center", justifyContent: "center", marginBottom: 12,
+    },
+    emptyDogText: { color: c.textMuted, fontSize: 15 },
+
+    // Dog - multi
+    avatarRow: {
+      flexDirection: "row", flexWrap: "wrap", gap: 16,
+      justifyContent: "center", marginBottom: 24,
+    },
+    avatarWrap: { alignItems: "center", width: 84 },
+    avatarOuter: { width: 68, height: 68, position: "relative", alignItems: "center", justifyContent: "center", marginBottom: 6 },
+    flowerBadge: { position: "absolute", top: -4, right: -4, fontSize: 18 },
+    avatarRing: { width: 64, height: 64, borderRadius: 32, borderWidth: 2.5, borderColor: c.border, overflow: "hidden" },
+    avatarImg: { width: "100%", height: "100%" },
+    avatarPlaceholder: { width: "100%", height: "100%", backgroundColor: c.background, alignItems: "center", justifyContent: "center" },
+    avatarName: { fontSize: 11, color: c.textMuted, textAlign: "center" },
+
+    // Weather
+    weatherCard: {
+      backgroundColor: c.surface, borderRadius: 24, padding: 20,
+      flexDirection: "row", alignItems: "center",
+      borderWidth: 1, borderColor: c.border, marginBottom: 28,
+    },
+    weatherLeft: { flex: 1, flexDirection: "row", alignItems: "center" },
+    weatherDivider: { width: 1, height: 44, marginHorizontal: 16 },
+    weatherRight: { flex: 1, flexDirection: "row", alignItems: "center" },
+    weatherTemp: { fontSize: 24, fontWeight: "700", color: c.text },
+    weatherCondition: { fontSize: 13, color: c.textMuted, marginTop: 2 },
+    pawLabel: { fontSize: 12, fontWeight: "700", color: c.text },
+    pawStatus: { fontSize: 11, fontWeight: "700", marginTop: 2 },
+
+    // Section
+    sectionTitle: { fontSize: 17, fontWeight: "700", color: c.text, marginBottom: 14 },
+    emptyText: { color: c.textMuted, fontSize: 14, marginBottom: 12 },
+
+    // Walk cards
+    walkCard: {
+      backgroundColor: c.surface, borderRadius: 24, marginBottom: 14,
+      overflow: "hidden", borderWidth: 1, borderColor: c.border,
+    },
+    walkCardHeader: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14, paddingBottom: 0 },
+    walkThumb: { width: 52, height: 52, borderRadius: 14 },
+    walkThumbPlaceholder: { width: 52, height: 52, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+    walkCardTitle: { fontSize: 14, fontWeight: "700", color: c.text },
+    walkCardDogs: { fontSize: 12, fontWeight: "600", marginTop: 2 },
+    walkChevron: { fontSize: 20, color: c.textMuted },
+    miniMap: { height: 130, width: "100%", marginTop: 10 },
+    miniMapPlaceholder: { height: 130, width: "100%", marginTop: 10, alignItems: "center", justifyContent: "center", gap: 6 },
+    miniMapDogName: { fontSize: 14, fontWeight: "700" },
+    walkStats: { flexDirection: "row", alignItems: "center", padding: 14, gap: 6 },
+    walkStat: { fontSize: 13, fontWeight: "600", color: c.text },
+    walkStatDot: { fontSize: 13, color: c.textMuted },
+
+    // Footer
+    footer: { paddingHorizontal: 24, paddingBottom: 28, paddingTop: 12, backgroundColor: c.background },
+    startBtn: { borderRadius: 30, height: 62, alignItems: "center", justifyContent: "center" },
+    startBtnText: { color: "#fff", fontSize: 17, fontWeight: "700", letterSpacing: 0.3 },
+  });
+}

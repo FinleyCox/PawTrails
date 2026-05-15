@@ -1,13 +1,18 @@
-import React, { useRef } from "react";
-import { View, Text, StyleSheet, ScrollView, Image } from "react-native";
+import React, { useRef, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert } from "react-native";
 import MapView, { Polyline, Marker } from "react-native-maps";
-import { useRoute, RouteProp } from "@react-navigation/native";
-import { COLORS } from "../constants/theme";
+import { useRoute, RouteProp, useNavigation } from "@react-navigation/native";
+import { useThemeStore } from "../stores/themeStore";
+import { useWalkStore } from "../stores/walkStore";
+import { deleteWalk as deleteWalkDoc } from "../services/firestoreService";
 import i18n from "../i18n";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../../App";
 import type { RoutePoint } from "../models/Walk";
+import type { Theme } from "../constants/theme";
 
 type Route = RouteProp<RootStackParamList, "WalkDetail">;
+type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 function routeRegion(route: RoutePoint[]) {
   if (route.length === 0) return { latitude: 35.6812, longitude: 139.7671, latitudeDelta: 0.01, longitudeDelta: 0.01 };
@@ -16,8 +21,7 @@ function routeRegion(route: RoutePoint[]) {
   const minLat = Math.min(...lats), maxLat = Math.max(...lats);
   const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
   return {
-    latitude: (minLat + maxLat) / 2,
-    longitude: (minLng + maxLng) / 2,
+    latitude: (minLat + maxLat) / 2, longitude: (minLng + maxLng) / 2,
     latitudeDelta: Math.max(maxLat - minLat, 0.004) * 1.6,
     longitudeDelta: Math.max(maxLng - minLng, 0.004) * 1.6,
   };
@@ -25,8 +29,36 @@ function routeRegion(route: RoutePoint[]) {
 
 export default function WalkDetailScreen() {
   const route = useRoute<Route>();
+  const navigation = useNavigation<Nav>();
   const { walk } = route.params;
+  const { colors } = useThemeStore();
+  const { deleteWalk } = useWalkStore();
   const mapRef = useRef<MapView>(null);
+  const [deleting, setDeleting] = useState(false);
+  const s = makeStyles(colors);
+
+  function handleDelete() {
+    Alert.alert("この散歩記録を削除しますか？", "削除すると元に戻せません。", [
+      { text: i18n.t("cancel"), style: "cancel" },
+      {
+        text: "削除",
+        style: "destructive",
+        onPress: async () => {
+          setDeleting(true);
+          try {
+            await deleteWalkDoc(walk.id);
+            deleteWalk(walk.id);
+            if (navigation.canGoBack()) navigation.goBack();
+            else navigation.navigate("Tabs");
+          } catch (e: any) {
+            Alert.alert(i18n.t("error"), e.message);
+          } finally {
+            setDeleting(false);
+          }
+        },
+      },
+    ]);
+  }
 
   const coords = walk.route.map((p) => ({ latitude: p.lat, longitude: p.lng }));
   const durationMs = (walk.endedAt ?? Date.now()) - walk.startedAt;
@@ -40,93 +72,90 @@ export default function WalkDetailScreen() {
   const peeCount = walk.events.filter((e) => e.type === "pee").length;
 
   return (
-    <View style={styles.container}>
+    <View style={s.container}>
       {walk.route.length > 1 ? (
-        <MapView
-          ref={mapRef}
-          style={styles.map}
-          initialRegion={routeRegion(walk.route)}
-        >
-          <Polyline coordinates={coords} strokeColor={COLORS.primary} strokeWidth={4} />
+        <MapView ref={mapRef} style={s.map} initialRegion={routeRegion(walk.route)}>
+          <Polyline coordinates={coords} strokeColor={colors.primary} strokeWidth={4} />
           {walk.events.map((ev, i) => (
-            <Marker
-              key={i}
-              coordinate={{ latitude: ev.location.lat, longitude: ev.location.lng }}
-              title={ev.type === "poo" ? "💩" : "💧"}
-              pinColor={ev.type === "poo" ? "brown" : "blue"}
-            />
+            <Marker key={i} coordinate={{ latitude: ev.location.lat, longitude: ev.location.lng }}
+              title={ev.type === "poo" ? "💩" : "💧"} pinColor={ev.type === "poo" ? "brown" : "blue"} />
           ))}
         </MapView>
       ) : (
-        <View style={styles.noMap}>
-          <Text style={styles.noMapText}>🗺️</Text>
-          <Text style={styles.noMapSub}>ルートデータなし</Text>
+        <View style={s.noMap}>
+          <Text style={s.noMapText}>🗺️</Text>
+          <Text style={s.noMapSub}>ルートデータなし</Text>
         </View>
       )}
 
-      <ScrollView style={styles.statsSheet} contentContainerStyle={styles.statsContent}>
-        <Text style={styles.dateText}>{dateStr}  {startTime}</Text>
+      <ScrollView style={s.sheet} contentContainerStyle={s.sheetContent}>
+        <View style={s.handle} />
+        <Text style={s.dateText}>{dateStr}  {startTime}</Text>
 
-        <View style={styles.statRow}>
-          <View style={styles.statBox}>
-            <Text style={styles.statValue}>{distKm}</Text>
-            <Text style={styles.statLabel}>{i18n.t("distance")} (km)</Text>
-          </View>
-          <View style={styles.statBox}>
-            <Text style={styles.statValue}>{mins}:{String(secs).padStart(2, "0")}</Text>
-            <Text style={styles.statLabel}>{i18n.t("duration")}</Text>
-          </View>
-          {walk.steps != null && walk.steps > 0 && (
-            <View style={styles.statBox}>
-              <Text style={styles.statValue}>{walk.steps.toLocaleString()}</Text>
-              <Text style={styles.statLabel}>{i18n.t("steps")}</Text>
-            </View>
-          )}
+        <View style={s.statGrid}>
+          <StatCard label={i18n.t("distance")} value={distKm} unit="km" colors={colors} />
+          <StatCard label={i18n.t("duration")} value={`${mins}:${String(secs).padStart(2, "0")}`} colors={colors} />
+          {(walk.steps ?? 0) > 0 && <StatCard label={i18n.t("steps")} value={(walk.steps ?? 0).toLocaleString()} colors={colors} />}
+          {walk.weather && <StatCard label={i18n.t("conditionLabel")} value={`${Math.round(walk.weather.temp)}°C`} colors={colors} />}
         </View>
 
-        <View style={styles.eventRow}>
-          {pooCount > 0 && (
-            <View style={styles.eventBadge}>
-              <Text style={styles.eventEmoji}>💩</Text>
-              <Text style={styles.eventCount}>×{pooCount}</Text>
-            </View>
-          )}
-          {peeCount > 0 && (
-            <View style={styles.eventBadge}>
-              <Text style={styles.eventEmoji}>💧</Text>
-              <Text style={styles.eventCount}>×{peeCount}</Text>
-            </View>
-          )}
-          {pooCount === 0 && peeCount === 0 && (
-            <Text style={styles.noEvents}>{i18n.t("eventsLabel")}: 0</Text>
-          )}
-        </View>
-
-        {!!walk.photoUrl && (
-          <Image source={{ uri: walk.photoUrl }} style={styles.walkPhoto} resizeMode="cover" />
+        {(pooCount > 0 || peeCount > 0) && (
+          <View style={s.eventRow}>
+            {pooCount > 0 && <View style={s.eventBadge}><Text style={s.eventEmoji}>💩</Text><Text style={s.eventCount}>×{pooCount}</Text></View>}
+            {peeCount > 0 && <View style={s.eventBadge}><Text style={s.eventEmoji}>💧</Text><Text style={s.eventCount}>×{peeCount}</Text></View>}
+          </View>
         )}
+
+        {!!walk.photoUrl && <Image source={{ uri: walk.photoUrl }} style={s.walkPhoto} resizeMode="cover" />}
+
+        <TouchableOpacity style={s.deleteBtn} onPress={handleDelete} disabled={deleting}>
+          <Text style={s.deleteBtnText}>{deleting ? "削除中..." : "この散歩を削除"}</Text>
+        </TouchableOpacity>
+        <View style={{ height: 32 }} />
       </ScrollView>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  map: { flex: 1 },
-  noMap: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: COLORS.surface },
-  noMapText: { fontSize: 64 },
-  noMapSub: { color: COLORS.textMuted, marginTop: 8 },
-  statsSheet: { maxHeight: 280, backgroundColor: COLORS.background },
-  statsContent: { padding: 20 },
-  dateText: { fontSize: 14, color: COLORS.textMuted, marginBottom: 16 },
-  statRow: { flexDirection: "row", justifyContent: "space-around", marginBottom: 16 },
-  statBox: { alignItems: "center" },
-  statValue: { fontSize: 24, fontWeight: "700", color: COLORS.text },
-  statLabel: { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
-  eventRow: { flexDirection: "row", gap: 16, marginBottom: 16 },
-  eventBadge: { flexDirection: "row", alignItems: "center", gap: 4 },
-  eventEmoji: { fontSize: 20 },
-  eventCount: { fontSize: 16, fontWeight: "600", color: COLORS.text },
-  noEvents: { color: COLORS.textMuted, fontSize: 14 },
-  walkPhoto: { width: "100%", height: 200, borderRadius: 12 },
+function StatCard({ label, value, unit, colors }: { label: string; value: string; unit?: string; colors: Theme }) {
+  return (
+    <View style={[cardS.card, { backgroundColor: colors.background, borderColor: colors.border }]}>
+      <Text style={[cardS.value, { color: colors.text }]}>
+        {value}{unit ? <Text style={[cardS.unit, { color: colors.textMuted }]}> {unit}</Text> : null}
+      </Text>
+      <Text style={[cardS.label, { color: colors.textMuted }]}>{label}</Text>
+    </View>
+  );
+}
+const cardS = StyleSheet.create({
+  card: { flex: 1, minWidth: "40%", borderRadius: 20, padding: 16, borderWidth: 1 },
+  value: { fontSize: 22, fontWeight: "700" },
+  unit: { fontSize: 14, fontWeight: "400" },
+  label: { fontSize: 12, marginTop: 4 },
 });
+
+function makeStyles(c: Theme) {
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.background },
+    map: { height: 260 },
+    noMap: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: c.surface },
+    noMapText: { fontSize: 64 },
+    noMapSub: { color: c.textMuted, marginTop: 8 },
+    sheet: { flex: 1, backgroundColor: c.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28 },
+    sheetContent: { padding: 20, paddingBottom: 48 },
+    deleteBtn: { marginTop: 24, borderWidth: 1, borderColor: c.danger, borderRadius: 16, paddingVertical: 14, alignItems: "center" },
+    deleteBtnText: { color: c.danger, fontWeight: "600", fontSize: 15 },
+    handle: { width: 36, height: 4, backgroundColor: c.border, borderRadius: 2, alignSelf: "center", marginBottom: 16 },
+    dateText: { fontSize: 14, color: c.textMuted, marginBottom: 16 },
+    statGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 16 },
+    eventRow: { flexDirection: "row", gap: 12, marginBottom: 16 },
+    eventBadge: {
+      flexDirection: "row", alignItems: "center", gap: 6,
+      backgroundColor: c.background, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 8,
+      borderWidth: 1, borderColor: c.border,
+    },
+    eventEmoji: { fontSize: 18 },
+    eventCount: { fontSize: 15, fontWeight: "600", color: c.text },
+    walkPhoto: { width: "100%", height: 200, borderRadius: 20 },
+  });
+}

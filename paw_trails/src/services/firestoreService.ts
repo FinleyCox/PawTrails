@@ -106,6 +106,10 @@ export async function addDogToFirestore(dog: Dog): Promise<void> {
   });
 }
 
+export async function deleteDogFromFirestore(dogId: string): Promise<void> {
+  await deleteDoc(doc(db, "dogs", dogId));
+}
+
 export async function updateDogInFirestore(dog: Dog): Promise<void> {
   await updateDoc(doc(db, "dogs", dog.id), {
     name: dog.name,
@@ -157,6 +161,10 @@ export function subscribeWalks(
     walks.sort((a, b) => b.startedAt - a.startedAt);
     callback(walks);
   });
+}
+
+export async function deleteWalk(walkId: string): Promise<void> {
+  await deleteDoc(doc(db, "walks", walkId));
 }
 
 // ─── GDPR：全データ削除 ────────────────────────────────────────────────────────

@@ -166,7 +166,7 @@ const translations = {
     editDog: "うちの子編集",
     saveChanges: "保存する",
     premiumTitle: "プレミアムプラン",
-    premiumSubtitle: "うちの子全員のお散歩を管理しましょう",
+    premiumSubtitle: "うちの子みんなのお散歩を管理しましょう",
     premiumFeature1: "🐾  うちの子みんなを登録",
     premiumFeature2: "👨‍👩‍👧  ファミリー共有（最大5人）",
     premiumFeature3: "📊  詳細な散歩分析",

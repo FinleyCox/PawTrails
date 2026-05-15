@@ -13,6 +13,7 @@ interface WalkState {
   setWalkPhoto: (photoUrl: string) => void;
   endWalk: () => Walk | null;
   setWalks: (walks: Walk[]) => void;
+  deleteWalk: (id: string) => void;
 }
 
 export const useWalkStore = create<WalkState>((set, get) => ({
@@ -57,4 +58,5 @@ export const useWalkStore = create<WalkState>((set, get) => ({
     return finished;
   },
   setWalks: (walks) => set({ walks }),
+  deleteWalk: (id) => set((s) => ({ walks: s.walks.filter((w) => w.id !== id) })),
 }));
